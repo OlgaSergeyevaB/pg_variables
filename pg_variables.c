@@ -15,6 +15,11 @@
 #include "access/htup_details.h"
 #include "access/xact.h"
 #include "catalog/pg_type.h"
+#include "nodes/nodes.h"
+#include "nodes/nodeFuncs.h"
+#include "nodes/primnodes.h"
+#include "nodes/supportnodes.h"
+#include "optimizer/optimizer.h"
 #include "parser/scansup.h"
 #include "storage/proc.h"
 #include "utils/builtins.h"
@@ -45,6 +50,7 @@ PG_FUNCTION_INFO_V1(remove_package);
 PG_FUNCTION_INFO_V1(remove_packages);
 PG_FUNCTION_INFO_V1(get_packages_and_variables);
 PG_FUNCTION_INFO_V1(get_packages_stats);
+PG_FUNCTION_INFO_V1(variable_select_support);
 
 extern void _PG_init(void);
 #if PG_VERSION_NUM < 150000
@@ -1770,6 +1776,76 @@ get_packages_stats(PG_FUNCTION_ARGS)
 		remove_packages_status(&packages_stats, rstat);
 		SRF_RETURN_DONE(funcctx);
 	}
+}
+
+/*
+ * Planner support function for variable_select(text, text)
+ */
+Datum
+variable_select_support(PG_FUNCTION_ARGS)
+{
+	Node* rawreq = (Node*)PG_GETARG_POINTER(0);
+	Node* ret = NULL;
+
+	if (IsA(rawreq, SupportRequestRows))
+	{
+		/* Try to estimate the number of rows returned */
+		SupportRequestRows* req = (SupportRequestRows*)rawreq;
+
+		if (is_funcclause(req->node))	/* be paranoid */
+		{
+			List* args = ((FuncExpr*)req->node)->args;
+			Node* arg1, * arg2;
+
+			arg1 = estimate_expression_value(req->root, linitial(args));
+			arg2 = estimate_expression_value(req->root, lsecond(args));
+
+			if ((IsA(arg1, Const) &&
+				((Const*)arg1)->constisnull) ||
+				(IsA(arg2, Const) &&
+					((Const*)arg2)->constisnull))
+			{
+				req->rows = 0;
+				ret = (Node*)req;
+			}
+			else if (IsA(arg1, Const) &&
+				IsA(arg2, Const))
+			{
+				text* package_name;
+				text* var_name;
+				Package* package;
+				Variable* variable;
+				MemoryContext context;
+				RecordVar* record;
+				int rows = 0;
+
+				package_name = (text*)DatumGetPointer(((Const*)arg1)->constvalue);
+				var_name = (text*)DatumGetPointer(((Const*)arg2)->constvalue);
+
+				package = getPackage(package_name, true);
+				variable = getVariableInternal(package, var_name, RECORDOID, true,
+					true);
+
+				record = &(GetActualValue(variable).record);
+
+				context = record->hctx;
+
+				rows = ((int)context->firstchild->mem_allocated) / 128;
+
+				req->rows = rows;
+				ret = (Node*)req;
+			}
+			else
+			{
+				req->rows = 1000;
+				ret = (Node*)req;
+			}
+
+
+		}
+	}
+
+	PG_RETURN_POINTER(ret);
 }
 
 /*
