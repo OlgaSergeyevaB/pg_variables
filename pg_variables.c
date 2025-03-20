@@ -1799,6 +1799,7 @@ variable_select_support(PG_FUNCTION_ARGS)
 
 			arg1 = estimate_expression_value(req->root, linitial(args));
 			arg2 = estimate_expression_value(req->root, lsecond(args));
+			req->rows = 1000;
 
 			if ((IsA(arg1, Const) &&
 				((Const*)arg1)->constisnull) ||
@@ -1806,7 +1807,6 @@ variable_select_support(PG_FUNCTION_ARGS)
 					((Const*)arg2)->constisnull))
 			{
 				req->rows = 0;
-				ret = (Node*)req;
 			}
 			else if (IsA(arg1, Const) &&
 				IsA(arg2, Const))
@@ -1817,31 +1817,36 @@ variable_select_support(PG_FUNCTION_ARGS)
 				Variable* variable;
 				MemoryContext context;
 				RecordVar* record;
-				int rows = 0;
 
 				package_name = (text*)DatumGetPointer(((Const*)arg1)->constvalue);
 				var_name = (text*)DatumGetPointer(((Const*)arg2)->constvalue);
 
-				package = getPackage(package_name, true);
-				variable = getVariableInternal(package, var_name, RECORDOID, true,
-					true);
 
-				record = &(GetActualValue(variable).record);
+				package = getPackage(package_name, false);
 
-				context = record->hctx;
+				if (package != NULL)
+				{
 
-				rows = ((int)context->firstchild->mem_allocated) / 128;
+					variable = getVariableInternal(package, var_name, RECORDOID, true,
+						false);
 
-				req->rows = rows;
-				ret = (Node*)req;
+					if (variable != NULL)
+					{
+
+						int rows = 0;
+
+						record = &(GetActualValue(variable).record);
+
+						context = record->hctx;
+
+						rows = ((int)context->firstchild->mem_allocated) / 128;
+
+						req->rows = rows;
+					}
+				}
 			}
-			else
-			{
-				req->rows = 1000;
-				ret = (Node*)req;
-			}
 
-
+			ret = (Node*)req;
 		}
 	}
 

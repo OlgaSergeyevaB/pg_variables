@@ -19,7 +19,7 @@ CREATE OR REPLACE FUNCTION pgv_select_support(internal) RETURNS internal
     LANGUAGE c
     AS 'MODULE_PATHNAME', 'variable_select_support';
 
-CREATE OR REPLACE FUNCTION FUNCTION pgv_select(package text, name text)
+CREATE OR REPLACE FUNCTION  pgv_select(package text, name text)
 RETURNS setof record SUPPORT pgv_select_support
 AS 'MODULE_PATHNAME', 'variable_select'
 LANGUAGE C VOLATILE;
